@@ -1,58 +1,170 @@
-# 🧠 Pipeline de Dados ELT – Brasil.IO
+# ** 🎲  Pipeline de Dados ELT para Consumo da API Brasil.IO**
 
-Este projeto implementa um pipeline de dados ELT para coletar, transformar e organizar informações públicas do Brasil.IO sobre gastos diretos do governo.
+Este documento apresenta a especificação técnica, arquitetura e funcionamento de um pipeline de **Extração, Carga e Transformação (ELT)** destinado ao processamento do dataset **gastos-diretos** disponibilizado pela API pública Brasil.IO.
+O projeto contempla desde a ingestão de dados brutos até a geração de artefatos analíticos estruturados para consumo por ferramentas de Business Intelligence (BI) e modelos de Machine Learning (ML).
 
-## 🚀 Visão Geral
+---
 
-Fluxo de camadas: Raw – dados brutos extraídos da API (.json); Bronze – dados estruturados e particionados (.parquet); Silver – dados limpos e padronizados (.parquet); Gold – dados agregados prontos para BI (.parquet).
+## **1. Requisitos e Preparação do Ambiente**
 
-## ⚙️ Requisitos
+### **1.1. Criação do ambiente Python**
 
-Python 3.10+
-Dependências: pip install requests pandas python-dotenv pyarrow
+Criar e ativar um ambiente virtual utilizando `venv`:
 
-## 🔑 Configuração
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
 
-Crie um arquivo .env na raiz do projeto com seu token do Brasil.IO:
-API_TOKEN=seu_token_aqui
-O token pode ser obtido no painel do Brasil.IO, em Configurações → API Token.
+### **1.2. Instalação de dependências**
 
-## ▶️ Execução
+Instalar os pacotes necessários via `pip` ou `uv`:
 
-Ative o ambiente virtual e rode: python main.py
-Etapas do pipeline:
+```bash
+pip install -r requirements.txt
+```
 
-1. fetch_and_save_raw_data() – coleta da API
-2. process_raw_to_bronze() – consolidação e conversão para Parquet
-3. process_bronze_to_silver() – limpeza e validação
-4. process_silver_to_gold() – agregação final
+### **1.3. Variáveis de ambiente**
 
-## 📊 Regras de Qualidade
+Criar um arquivo `.env` contendo:
 
-Colunas obrigatórias: ano, mes, nome_orgao, nome_favorecido, valor
-mes deve estar entre 1 e 12
-valor não pode ser negativo
-Dados nulos são tratados
-Textos padronizados
+```
+API_TOKEN=SEU_TOKEN_BRASIL_IO
+```
 
-## ⚠️ Limitações
+Essa variável é utilizada para autenticação nas requisições HTTP à API.
 
-1. Limite de requisições (429 Too Many Requests) – o script aguarda 15 segundos automaticamente antes de continuar para evitar bloqueios.
-2. Paginação automática – percorre todas as páginas e evita downloads duplicados.
-3. Particionamento – falha controlada se colunas ano ou mes não existirem.
-4. Erros de conversão – tratados com try/except.
+### **1.4. Estrutura de diretórios**
 
-## 🧠 Camada Gold
+Criar a seguinte hierarquia de pastas:
 
-Gera o artefato gastos_agregados_por_orgao com o total gasto por ano, mes e nome_orgao.
+```
+dataset/
+ ├── raw/
+ ├── bronze/
+ ├── silver/
+ └── gold/
+```
 
-## 🧪 Testes de Qualidade
+---
 
-Executa verificações de colunas críticas, meses válidos e valores não negativos.
+## **2. Arquitetura Geral do Pipeline**
 
-## 🧰 Comandos Úteis
+O pipeline segue o modelo de camadas do **Data Lakehouse**, organizado em Raw, Bronze, Silver e Gold.
 
-Criar ambiente virtual: python -m venv venv
-Ativar: .\venv\Scripts\activate (Windows) ou source venv/bin/activate (Linux/Mac)
-Instalar dependências: pip install -r requirements.txt
-Rodar pipeline: python main.py
+### **2.1. Raw (Dados Brutos)**
+
+* Contém todos os dados obtidos diretamente da API Brasil.IO.
+* Cada página da API é salva individualmente em formato **JSON**.
+* A coleta respeita:
+
+  * limite aproximado de **1000 páginas**;
+  * tratamento automático de **rate limit 429**, com espera antes de retentar.
+
+### **2.2. Bronze (Dados Padronizados em Parquet)**
+
+* Consolidação dos arquivos JSON da camada Raw.
+* Conversão para **Parquet**, com compressão *snappy*.
+* Particionamento estruturado em:
+
+```
+ano=YYYY / mes=MM
+```
+
+Essa etapa melhora interoperabilidade, performance e organização dos dados.
+
+### **2.3. Silver (Dados Tratados e Validados)**
+
+A camada Silver representa a primeira etapa de transformação significativa.
+
+Transformações aplicadas:
+
+* **Tratamento de valores nulos** (especialmente em `valor`).
+* **Padronização textual** (maiúsculas, remoção de espaços excedentes).
+* **Conversão de tipos numéricos** (`ano`, `mes`, `valor`).
+* **Conversão de datas** quando aplicável.
+* **Aplicação de regras de integridade e qualidade**:
+
+  * colunas críticas sem valores nulos (`ano`, `mes`, `nome_orgao`, `nome_favorecido`);
+  * validação de intervalo de mês (1 a 12);
+  * verificação de ausência de valores monetários negativos.
+
+Realiza-se também uma **análise exploratória básica**, incluindo:
+
+* contagem de registros;
+* número de órgãos distintos;
+* faixa temporal disponível;
+* valor médio dos pagamentos.
+
+Os dados tratados são registrados em formato **Parquet particionado**, mantendo o mesmo padrão da camada Bronze.
+
+### **2.4. Gold (Dados Agregados e Modelados)**
+
+A camada Gold representa a camada de **serviço (Serving Layer)**, destinada ao consumo por analistas, aplicações e modelos.
+
+São realizadas agregações orientadas a valor, por exemplo:
+
+* total de gastos por órgão, ano e mês.
+
+Essa etapa caracteriza a geração de **data products**, estruturados para uso imediato, em formato Parquet e com o mesmo esquema de particionamento.
+
+---
+
+## **3. Funcionamento do Pipeline**
+
+O arquivo `main.py` orquestra todas as etapas:
+
+1. **fetch_and_save_raw_data()**
+   Consulta a API Brasil.IO, trata paginação e limitações, salva arquivos brutos.
+
+2. **process_raw_to_bronze()**
+   Converte e estrutura os dados brutos em Parquet particionado.
+
+3. **process_bronze_to_silver()**
+   Aplica regras de limpeza, padronização e validação de qualidade.
+
+4. **process_silver_to_gold()**
+   Gera tabelas agregadas de alto valor analítico.
+
+Para executar:
+
+```bash
+python main.py
+```
+
+---
+
+## **4. Considerações sobre o Ciclo de Vida dos Dados**
+
+### **Transform (T)**
+
+Corresponde à etapa em que os dados deixam sua forma original para assumirem um formato estruturado, limpo e útil para casos de uso *downstream*.
+Transformações em lote (batch) — como neste projeto — são amplamente utilizadas em pipelines tradicionais e modernos.
+
+### **Camada Gold e Uso Final**
+
+A camada Gold representa a fase final do ciclo, com dados prontos para:
+
+* análises descritivas e diagnósticas,
+* modelagem preditiva,
+* ingestão por ferramentas de BI,
+* execução de processos de Reverse ETL.
+
+Essa camada contém dados já agregados, coerentes e validados, otimizados para consultas rápidas e decisões de negócio.
+
+---
+
+## **5. Resultado Final**
+
+Ao final da execução completa, obtém-se:
+
+* **Raw**: dados brutos da API Brasil.IO;
+* **Bronze**: Parquets estruturados e próximos do estado original;
+* **Silver**: dados limpos, padronizados e aprovados em testes de qualidade;
+* **Gold**: artefatos analíticos prontos para uso corporativo.
+
+O projeto entrega um pipeline ELT robusto, modular, escalável e alinhado às melhores práticas contemporâneas de Engenharia de Dados.
+
+---
+
+Se desejar, posso gerar a versão em **PDF**, produzir um **diagrama da arquitetura** ou criar **exemplos de dashboards** consumindo a camada Gold.
