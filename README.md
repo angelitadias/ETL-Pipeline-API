@@ -164,7 +164,3 @@ Ao final da execução completa, obtém-se:
 * **Gold**: artefatos analíticos prontos para uso corporativo.
 
 O projeto entrega um pipeline ELT robusto, modular, escalável e alinhado às melhores práticas contemporâneas de Engenharia de Dados.
-
----
-
-Se desejar, posso gerar a versão em **PDF**, produzir um **diagrama da arquitetura** ou criar **exemplos de dashboards** consumindo a camada Gold.
